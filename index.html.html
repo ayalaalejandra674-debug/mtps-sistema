@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Sistema MTPS</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+<style>
+body{font-family:Arial;margin:0;background:#f4f6f9;}
+.header{background:#003366;color:white;text-align:center;padding:10px;}
+.container{padding:15px;}
+.card{background:white;padding:15px;border-radius:10px;margin-bottom:15px;}
+input,select,textarea{
+width:100%;padding:8px;margin:5px 0;border-radius:6px;border:1px solid #ccc;
+}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+button{background:#003366;color:white;padding:6px 12px;border:none;border-radius:6px;}
+.btn-container{text-align:right;margin-top:10px;}
+.delete-btn{background:#b30000;color:white;font-size:12px;padding:3px 6px;border-radius:4px;}
+table{width:100%;border-collapse:collapse;margin-top:10px;}
+th{background:#003366;color:white;}
+td,th{border:1px solid #ccc;padding:6px;text-align:center;}
+.total{background:#e6f0ff;font-weight:bold;}
+</style>
+</head>
+
+<body>
+
+<div class="header">
+<h2>MINISTERIO DE TRABAJO Y PREVISIÓN SOCIAL</h2>
+<h3>DIRECCIÓN GENERAL DE INSPECCIÓN DE TRABAJO</h3>
+</div>
+
+<div class="container">
+
+<div class="card">
+<h3>Datos</h3>
+
+<input type="text" id="inspector" placeholder="Nombre del Inspector">
+<input type="text" id="trabajador" placeholder="Nombre del Trabajador">
+
+<select id="tipoSalario">
+<option value="mensual">Mensual</option>
+<option value="quincenal">Quincenal</option>
+<option value="semanal">Semanal</option>
+</select>
+
+<input type="number" id="salario" placeholder="Salario">
+
+<textarea id="horarioOrdinario" placeholder="Horario normal ordinario"></textarea>
+<textarea id="comentarioInspector" placeholder="Comentario"></textarea>
+
+<div id="valorHora"></div>
+<div id="valorDia"></div>
+</div>
+
+<div class="card">
+<h3>Día 1</h3>
+<input type="date" id="fecha1">
+
+<div class="grid">
+<input type="time" id="m1_1">
+<input type="time" id="m1_2">
+<input type="time" id="t1_1">
+<input type="time" id="t1_2">
+<input type="time" id="extra1">
+</div>
+</div>
+
+<div class="card">
+<h3>Día 2 (si continúa)</h3>
+<input type="date" id="fecha2">
+
+<div class="grid">
+<input type="time" id="m2_1">
+<input type="time" id="m2_2">
+<input type="time" id="t2_1">
+<input type="time" id="t2_2">
+<input type="time" id="extra2">
+</div>
+</div>
+
+<div class="btn-container">
+<button onclick="agregar()">Agregar jornada</button>
+</div>
+
+<div class="card">
+<h3>Resumen</h3>
+
+<table>
+<thead>
+<tr>
+<th>Fecha</th>
+<th>Total</th>
+<th>Normales</th>
+<th>Pago normal</th>
+<th>Extras</th>
+<th>Ext D</th>
+<th>Pago D</th>
+<th>Ext N</th>
+<th>Pago N</th>
+<th>Asueto</th>
+<th>Total $</th>
+<th></th>
+</tr>
+</thead>
+
+<tbody id="tabla"></tbody>
+<tfoot id="totales"></tfoot>
+</table>
+
+<div class="btn-container">
+<button onclick="exportarExcel()">Excel</button>
+</div>
+
+</div>
+
+</div>
+
+<script>
+
+let datos=[];
+
+// ASUETOS (MES-DÍA)
+const asuetos=["01-01","05-01","08-06","09-15","11-02","12-25"];
+
+function esAsueto(f){
+if(!f) return false;
+let [y,m,d]=f.split("-");
+return asuetos.includes(m+"-"+d);
+}
+
+// FORMATO HH:MM
+function formatoHora(h){
+let m=Math.round(h*60);
+return Math.floor(m/60)+":"+(m%60<10?"0":"")+(m%60);
+}
+
+function valorHoraCalc(){
+let s=salario.value,t=tipoSalario.value;
+if(!s) return 0;
+if(t==="mensual") return s/30/8;
+if(t==="quincenal") return s/15/8;
+if(t==="semanal") return s/7/8;
+}
+
+salario.oninput=mostrarValores;
+tipoSalario.onchange=mostrarValores;
+
+function mostrarValores(){
+let vh=valorHoraCalc();
+valorHora.innerHTML="Valor hora: $"+vh.toFixed(2);
+valorDia.innerHTML="Valor día: $"+(vh*8).toFixed(2);
+}
+
+function aMin(t){
+if(!t) return null;
+let [h,m]=t.split(":").map(Number);
+return h*60+m;
+}
+
+function esNocturna(m){
+return (m>=1140 || m<360);
+}
+
+function construirTimeline(){
+
+let t=[];
+
+if(m1_1.value&&m1_2.value)
+t.push([aMin(m1_1.value),aMin(m1_2.value)]);
+
+if(t1_1.value&&t1_2.value)
+t.push([aMin(t1_1.value),aMin(t1_2.value)]);
+
+if(extra1.value && t1_2.value)
+t.push([aMin(t1_2.value),aMin(extra1.value)]);
+
+if(fecha2.value){
+let o=1440;
+
+if(m2_1.value&&m2_2.value)
+t.push([aMin(m2_1.value)+o,aMin(m2_2.value)+o]);
+
+if(t2_1.value&&t2_2.value)
+t.push([aMin(t2_1.value)+o,aMin(t2_2.value)+o]);
+
+if(extra2.value && t2_2.value)
+t.push([aMin(t2_2.value)+o,aMin(extra2.value)+o]);
+}
+
+return t;
+}
+
+function calcular(timeline){
+
+let totalMin=0,extraD=0,extraN=0;
+
+timeline.forEach(b=>{
+let ini=b[0],fin=b[1];
+if(fin<ini) fin+=1440;
+
+for(let x=ini;x<fin;x++){
+if(totalMin<480){
+totalMin++;
+}else{
+if(esNocturna(x%1440)) extraN++;
+else extraD++;
+totalMin++;
+}
+}
+});
+
+return{
+total:totalMin/60,
+normales:Math.min(totalMin/60,8),
+extras:(extraD+extraN)/60,
+extraD:extraD/60,
+extraN:extraN/60
+};
+}
+
+function agregar(){
+
+let vh=valorHoraCalc();
+let res=calcular(construirTimeline());
+let feriado=esAsueto(fecha1.value);
+
+// PAGOS
+let pagoNormal=res.normales*vh;
+let pagoD=res.extraD*vh*2;
+let pagoN=res.extraN*vh*2.5; // 🔥 CORREGIDO
+
+// ASUETO
+if(feriado){
+pagoNormal*=2;
+pagoD*=2;
+pagoN*=2;
+}
+
+let total=pagoNormal+pagoD+pagoN;
+
+datos.push({
+fecha:fecha1.value+" → "+(fecha2.value||""),
+...res,
+pagoNormal,
+pagoD,
+pagoN,
+asueto:feriado,
+totalPago:total
+});
+
+render();
+}
+
+function eliminar(i){
+datos.splice(i,1);
+render();
+}
+
+function render(){
+
+tabla.innerHTML="";
+let total=0;
+
+datos.forEach((d,i)=>{
+
+total+=d.totalPago;
+
+tabla.innerHTML+=`
+<tr>
+<td>${d.fecha}</td>
+<td>${formatoHora(d.total)}</td>
+<td>${formatoHora(d.normales)}</td>
+<td>$${d.pagoNormal.toFixed(2)}</td>
+<td>${formatoHora(d.extras)}</td>
+<td>${formatoHora(d.extraD)}</td>
+<td>$${d.pagoD.toFixed(2)}</td>
+<td>${formatoHora(d.extraN)}</td>
+<td>$${d.pagoN.toFixed(2)}</td>
+<td>${d.asueto?"Sí":"No"}</td>
+<td>$${d.totalPago.toFixed(2)}</td>
+<td><button class="delete-btn" onclick="eliminar(${i})">🗑</button></td>
+</tr>`;
+});
+
+totales.innerHTML=`
+<tr class="total">
+<td colspan="10">TOTAL</td>
+<td>$${total.toFixed(2)}</td>
+<td></td>
+</tr>`;
+}
+
+function exportarExcel(){
+
+let data=[["Fecha","Horas","Normales","Pago normal","Extras","Total"]];
+
+datos.forEach(d=>{
+data.push([d.fecha,d.total,d.normales,d.pagoNormal,d.extras,d.totalPago]);
+});
+
+let ws=XLSX.utils.aoa_to_sheet(data);
+let wb=XLSX.utils.book_new();
+XLSX.utils.book_append_sheet(wb,ws,"Reporte");
+XLSX.writeFile(wb,"MTPS.xlsx");
+}
+
+mostrarValores();
+
+</script>
+
+</body>
+</html>
